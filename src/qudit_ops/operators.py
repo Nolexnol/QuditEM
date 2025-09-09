@@ -1,6 +1,7 @@
 import cirq
 import numpy as np
-
+import itertools
+from typing import Sequence, Tuple
 
 #TODO: Generalize to qudits of any dimension: Done
 #TODO: Add controlled gates: Done
@@ -27,7 +28,7 @@ class Christensen(cirq.Gate):
         return h
 
     def _circuit_diagram_info_(self, args):
-        return f"C{self.d}"
+        return f"Cr"
 
 
 '''
@@ -83,6 +84,7 @@ class ModAdd(cirq.Gate):
 
     def _circuit_diagram_info_(self, args):
         return f"[{"+"*self.a}]"
+    
 class FlipGate(cirq.Gate):
     """
     Generalized flip gate that maps basis state |i⟩ to |j⟩ in a qudit of dimension d.
@@ -253,7 +255,10 @@ class CZGate(cirq.Gate):
         return unitary
 
     def _circuit_diagram_info_(self, args):
-        return f"({self.c})", f"Z{self.p}"
+        if self.p == 1:
+            return f"({self.c})", "Z"
+        else:
+            return f"({self.c})", f"Z{self.p}"
 # print(cirq.unitary(CZGate(4, 1)))
 
 class CModAdd(cirq.Gate):
@@ -284,13 +289,174 @@ class CModAdd(cirq.Gate):
     def _circuit_diagram_info_(self, args):
         return f"({self.c})", f"[{"+"*self.a}]"
     
+class ZXcomm_rel():
+    def __init__(self, z: int, x: int, dim: int = 2):
+        self.z = z
+        self.x = x
+        self.d = dim
+        if self.z>= self.d or self.x >= self.d:
+            raise ValueError("Invalid indices for commutation relation.")
+    def __str__(self):
+        """
+        Prints out the commutation relation between Z gate and Modulo Add gate.
+        """
+        Z = cirq.unitary(ZGate(self.z,dim=self.d))
+        X = cirq.unitary(ModAdd(self.x,dim=self.d))
+        ZX = Z @ X
+        XZ = X @ Z
+
+        nz_ZX = ZX[ZX != 0]
+        nz_XZ = XZ[XZ != 0]
+        np.set_printoptions(precision=5,suppress=True)
+        factor = np.around(nz_ZX[-1]/nz_XZ[-1], decimals=3)
+        
+        return (
+            f"Z{self.z}_X{self.x}\n"
+            f"{ZX}\n"
+            f"X{self.x}_Z{self.z}\n"
+            f"{XZ}\n\n"
+            f" Z{self.z}_X{self.x} = {factor}*X{self.x}_Z{self.z}"
+            )
+
+SHIFT = ModAdd(1, dim=3)._unitary_()
+# omega = np.exp(1j * 2 / 3 * np.pi)
+CLOCK = ZGate(1, dim=3)._unitary_()
 
 
-# H = cirq.unitary(Christensen(dim=4))
-# result = np.allclose(
-# cirq.unitary(Christensen(dim=4)) @ cirq.unitary(ModAdd(1, dim=4)) @ H.conj().T,
-# cirq.unitary(ZGate(1, dim=4))
-# )
-# print(result)
 
+class QutritDepolarizingChannel(cirq.Gate):
+    r"""A channel that depolarizes one qutrit.
+    """
+
+    def __init__(self, p: float) -> None:
+        """Constructs a depolarization channel on a qutrit.
+
+        Args:
+            p: The probability that one of the shift/clock matrices is applied. Each of
+                the 8 shift/clock gates is applied independently with probability
+                $p / 8$.
+            n_qubits: the number of qubits.
+
+        Raises:
+            ValueError: if p is not a valid probability.
+        """
+
+        error_probabilities = {}
+
+        p_depol = p / 8
+        p_identity = 1.0 - p
+        for gate_pows in itertools.product(range(3), range(3)):
+            if gate_pows == (0, 0):
+                error_probabilities[gate_pows] = p_identity
+            else:
+                error_probabilities[gate_pows] = p_depol
+        self.error_probabilities = error_probabilities
+        self._p = p
+
+    def _qid_shape_(self):
+        return (3,)
+
+    def _mixture_(self) -> Sequence[Tuple[float, np.ndarray]]:
+        op = lambda shift_pow, clock_pow: np.linalg.matrix_power(SHIFT, shift_pow) @ np.linalg.matrix_power(CLOCK,
+                                                                                                            clock_pow)
+        return [(self.error_probabilities[(shift_pow, clock_pow)], op(shift_pow, clock_pow))
+                for (shift_pow, clock_pow) in self.error_probabilities.keys()]
+
+    def _has_mixture_(self) -> bool:
+        return True
+
+    def _value_equality_values_(self):
+        return self._p
+
+    def _circuit_diagram_info_(self, args):
+        if args.precision is not None:
+            return (f"D3({self._p:.{args.precision}g})",)
+        else:
+            return (f"D3({self._p})",)
+        return result
+
+    @property
+    def p(self) -> float:
+        """The probability that one of the qutrit gates is applied.
+
+        Each of the 8 Pauli gates is applied independently with probability
+        $p / 8$.
+        """
+        return self._p
+
+    @property
+    def n_qubits(self) -> int:
+        """The number of qubits"""
+        return 1
+
+class QuditDepolarizingChannel(cirq.Gate):
+    r"""A channel that depolarizes one qudit.
+    """
+
+    def __init__(self, p: float,dim: int) -> None:
+        """Constructs a depolarization channel on a qutrit.
+
+        Args:
+            p: The probability that one of the shift/clock matrices is applied. Each of
+                the 8 shift/clock gates is applied independently with probability
+                $p / 8$.
+            n_qubits: the number of qubits.
+
+        Raises:
+            ValueError: if p is not a valid probability.
+        """
+        error_probabilities = {}
+        f_dim = float(dim)
+        # p = ((f_dim**2 - 1)/f_dim**2)*p
+
+        p_depol = p / (f_dim**2 - 1)
+        p_identity = 1.0 - p
+        for gate_pows in itertools.product(range(dim), range(dim)): 
+            if gate_pows == (0, 0):
+                error_probabilities[gate_pows] = p_identity
+            else:
+                error_probabilities[gate_pows] = p_depol
+        self.error_probabilities = error_probabilities
+        self._p = p
+        self._d = dim
+    def _qid_shape_(self):
+        return (self._d,)
+
+    def _mixture_(self) -> Sequence[Tuple[float, np.ndarray]]:
+        DSHIFT = ModAdd(1, dim=self._d)._unitary_()
+        DCLOCK = ZGate(1, dim=self._d)._unitary_()
+        op = lambda shift_pow, clock_pow: np.linalg.matrix_power(DSHIFT, shift_pow) @ np.linalg.matrix_power(DCLOCK, clock_pow)
+
+        return [(self.error_probabilities[(shift_pow, clock_pow)], op(shift_pow, clock_pow))
+                for (shift_pow, clock_pow) in self.error_probabilities.keys()]
+
+    def _has_mixture_(self) -> bool:
+        return True
+
+    def _value_equality_values_(self):
+        return self._p
+
+    def _circuit_diagram_info_(self, args):
+        if args.precision is not None:
+            return (f"D{self._d}({self._p:.{args.precision}g})",)
+        else:
+            return (f"D{self._d}({self._p})",)
+
+    @property
+    def p(self) -> float:
+        """The probability that one of the qutrit gates is applied.
+
+        Each of the d**2 - 1 Pauli gates is applied independently with probability
+        $p / d**2 - 1$.
+        """
+        return self._p
     
+    @property
+    def dim(self) -> int:
+        """The dimension of the qudit"""
+        return self._d
+
+    @property
+    def n_qubits(self) -> int:
+        """The number of qubits"""
+        return 1
