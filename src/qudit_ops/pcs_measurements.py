@@ -1,6 +1,6 @@
 
 """
-Module for automatically applying PCS to arbitrary circuits(To-be-implemented) and extracting counts.
+Module for PCS measurements.
 """
 
 import cirq

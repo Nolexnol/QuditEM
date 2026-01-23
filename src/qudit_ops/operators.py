@@ -30,6 +30,22 @@ class Christensen(cirq.Gate):
     def _circuit_diagram_info_(self, args):
         return f"Cr"
 
+class Christensen_dg(cirq.Gate):
+    def __init__(self,dim: int = 2):
+        self.d = dim
+    def _qid_shape_(self):
+        return (self.d,)
+
+    def _unitary_(self):
+        # Return the conjugate transpose (adjoint) of the Christensen gate unitary.
+        c = Christensen(dim=self.d)
+        u = c._unitary_()
+        return np.conjugate(u).T
+
+    def _circuit_diagram_info_(self, args):
+        return f"Cr†"
+    
+
 
 '''
 Generalized gates for qudits of dimension = d
@@ -83,7 +99,7 @@ class ModAdd(cirq.Gate):
         #                  [0, 0, 1, 0]])
 
     def _circuit_diagram_info_(self, args):
-        return f"[{"+"*self.a}]"
+        return f"[{'+'*self.a}]"
     
 class FlipGate(cirq.Gate):
     """
@@ -287,7 +303,7 @@ class CModAdd(cirq.Gate):
         return unitary
 
     def _circuit_diagram_info_(self, args):
-        return f"({self.c})", f"[{"+"*self.a}]"
+        return f"({self.c})", f"[{'+'*self.a}]"
     
 class ZXcomm_rel():
     def __init__(self, z: int, x: int, dim: int = 2):
